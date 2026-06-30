@@ -1,0 +1,38 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    function userDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+    function isAdmin() {
+      return isSignedIn() && userDoc().role == "admin";
+    }
+    function isSupervisorOf(municipality) {
+      return isSignedIn() && userDoc().role == "supervisor" && userDoc().municipality == municipality;
+    }
+
+    // وثيقة المستخدم: كل مستخدم يقرأ وثيقته فقط، والإدارة تقرأ الكل
+    match /users/{uid} {
+      allow read: if isSignedIn() && (request.auth.uid == uid || isAdmin());
+      allow write: if isAdmin(); // إنشاء/تعديل حسابات المستخدمين عبر الإدارة فقط
+    }
+
+    // المراكز الصحية: المشرف يضيف/يقرأ مراكز بلديته فقط، الإدارة تقرأ الكل
+    match /centers/{centerId} {
+      allow read: if isAdmin() || (isSignedIn() && isSupervisorOf(resource.data.municipality));
+      allow create: if isSignedIn() && isSupervisorOf(request.resource.data.municipality);
+      allow update, delete: if isAdmin() || (isSignedIn() && isSupervisorOf(resource.data.municipality));
+    }
+
+    // المعدات: نفس منطق المراكز الصحية
+    match /equipment/{equipId} {
+      allow read: if isAdmin() || (isSignedIn() && isSupervisorOf(resource.data.municipality));
+      allow create: if isSignedIn() && isSupervisorOf(request.resource.data.municipality);
+      allow update, delete: if isAdmin() || (isSignedIn() && isSupervisorOf(resource.data.municipality));
+    }
+  }
+}
